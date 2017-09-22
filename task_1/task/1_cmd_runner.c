@@ -111,7 +111,7 @@ int main()
 		} else {
 			n = readArgs(buffer);
 			argsList = separateArgs(n, buffer);		
-			execv(argsList[0], argsList);
+			execvp(argsList[0], argsList);
 		}
 	}	
 	return 0;
