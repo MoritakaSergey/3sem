@@ -17,7 +17,7 @@ char* getArg(char* input)
 		s++;
 	}
 	e = s;
-	while (input[e] != ' ' && input[e] != '\0') {
+	while (input[e] != ' ' && input[e] != '\0' && input[e] != '\n') {
 		e++;
 	}
 	arg = (char*)malloc((e - s + 1)*sizeof(char));
@@ -46,15 +46,16 @@ int readArgs(char** buffer)
 			(*buffer)[i] = '\0';
 			break;
 		}
-		if ((*buffer)[i] == ' ') {
-			isEmpty = 1;
+		if (isEmpty == 0) {
+			if ((*buffer)[i] == ' ') 
+				isEmpty = 1;
 		} else {
-			if (isEmpty == 1) {
-				isEmpty == 0;
+			if ((*buffer)[i] != ' ') {
+				isEmpty = 0;
 				n++;
-			} 
+			}
 		}
-		i++;
+ 		i++;
 		if (i == bufferSize) {
 			bufferSize *= 2;
 			*buffer = (char*)realloc(*buffer, bufferSize);
@@ -90,7 +91,7 @@ int main()
 {
 	char isExecute = 1;
 	int status;
-	int n;
+	int n = 0;
 	char* buffer;
 	char** argsList;
 	pid_t pid = 0;
@@ -98,7 +99,7 @@ int main()
 		pid = fork();	
 		if (pid < 0) {
 			printf("fork() error\n");
-			return -1;
+			exit(-1);
 		}
 		if (pid) {
 			waitpid(pid, &status, 0);
@@ -109,8 +110,9 @@ int main()
 			n = readArgs(&buffer);
 			argsList = separateArgs(n, buffer);		
 			execvp(argsList[0], argsList);
+			exit(-1);
 		}
-	}	
+	}
 	return 0;
 }
 
