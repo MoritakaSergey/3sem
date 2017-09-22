@@ -108,7 +108,8 @@ int main()
 				isExecute = 0;
 		} else {
 			n = readArgs(&buffer);
-			argsList = separateArgs(n, buffer);		
+			argsList = separateArgs(n, buffer);
+			free(buffer);		
 			execvp(argsList[0], argsList);
 			exit(-1);
 		}
