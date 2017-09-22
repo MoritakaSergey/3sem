@@ -16,6 +16,8 @@
 #include<sys/types.h>
 #include<sys/wait.h>
 
+#define STARTBUFFERSIZE 4 
+
 char* getArg(char* input) 
 {
 	int i = 0;
@@ -43,17 +45,19 @@ char* getArg(char* input)
 }
 
 
-int readArgs(char* buffer)
+int readArgs(char** buffer)
 {
 	int n = 0;
 	int i = 0;
 	char isEmpty = 1;
-	while ((buffer[i] = getchar()) != '\0') {		
-		if(buffer[i] == '\n') {
-			buffer[i] = '\0';
+	int bufferSize = STARTBUFFERSIZE;
+	*buffer = (char*)malloc(bufferSize * sizeof(char));
+	while (((*buffer)[i] = getchar()) != '\0') {		
+		if((*buffer)[i] == '\n') {
+			(*buffer)[i] = '\0';
 			break;
 		}
-		if (buffer[i] == ' ') {
+		if ((*buffer)[i] == ' ') {
 			isEmpty = 1;
 		} else {
 			if (isEmpty == 1) {
@@ -62,6 +66,10 @@ int readArgs(char* buffer)
 			} 
 		}
 		i++;
+		if (i == bufferSize) {
+			bufferSize *= 2;
+			*buffer = (char*)realloc(*buffer, bufferSize);
+		}
 	}
 	return n;
 }
@@ -94,7 +102,7 @@ int main()
 	char isExecute = 1;
 	int status;
 	int n;
-	char buffer[50];
+	char* buffer;
 	char** argsList;
 	pid_t pid = 0;
 	while (isExecute) {
@@ -109,7 +117,7 @@ int main()
 			if (getchar() == 'q')
 				isExecute = 0;
 		} else {
-			n = readArgs(buffer);
+			n = readArgs(&buffer);
 			argsList = separateArgs(n, buffer);		
 			execvp(argsList[0], argsList);
 		}
