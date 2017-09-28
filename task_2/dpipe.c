@@ -51,5 +51,41 @@ void receive(int fd, char* buffer)
 
 int main() 
 {
+	dpipe_t dp;
+        pid_t pid;
+        int size;
+        char buffer[100];
+        char *string;
+        if (dpipe(&dp) < 0) {
+                printf("Can\'t create dpipe\n");
+                exit(-1);
+        }
+
+        pid = fork();
+
+        if (pid < 0) {
+                printf("Can\'t fork child\n");
+                exit(-1);
+        } else if (pid > 0) {
+                string = "Can you answer me?";
+                closeGate(dp, 0);
+
+                send(dp.txd[1], string);
+                close(dp.txd[1]);       
+                receive(dp.rxd[1], buffer);
+                close(dp.rxd[1]);
+
+                printf("Parent exit\n");
+        } else {
+                string = "Yes, I can, because this pipe is duplex.";
+                closeGate(dp, 1);
+
+                receive(dp.rxd[0], buffer);
+                close(dp.rxd[0]);
+                send(dp.txd[0], string);
+                close(dp.txd[0]);
+
+                printf("Child exit\n");
+        }
 	return 0;
 }
