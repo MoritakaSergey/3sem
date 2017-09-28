@@ -8,22 +8,20 @@ typedef struct {
 	int rxd[2];	
 } dpipe_t;
 
-int dpipe(dpipe_t dp)
+int dpipe(dpipe_t* dp)
 {
         int channel1[2];
         int channel2[2];
         if (pipe(channel1) == -1) {
-                exit(-1);
+                return -1;
         }
         if (pipe(channel2) == -1) {
-                close(channel1[0]);
-                close(channel1[1]);
-                exit(-1);
+                return -1;
         }
-        dp.txd[0] = channel2[1];
-        dp.rxd[0] = channel1[0];
-        dp.txd[1] = channel1[1];
-        dp.rxd[1] = channel2[0];
+        dp->txd[0] = channel1[1];
+        dp->rxd[0] = channel2[0];
+        dp->txd[1] = channel2[1];
+        dp->rxd[1] = channel1[0];
         return 0;
 } 
 
@@ -37,6 +35,5 @@ int closeGate(dpipe_t dp, int numOfGate)
 
 int main() 
 {
-
-}       
-
+	return 0;
+}
