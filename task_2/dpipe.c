@@ -25,4 +25,18 @@ int dpipe(dpipe_t dp)
         dp.txd[1] = channel1[1];
         dp.rxd[1] = channel2[0];
         return 0;
+} 
+
+int closeGate(dpipe_t dp, int numOfGate)
+{
+        if (close(dp.txd[numOfGate]) + close(dp.rxd[numOfGate]) < 0) {
+                return -1;
+        }
+        return 0;
 }
+
+int main() 
+{
+
+}       
+
