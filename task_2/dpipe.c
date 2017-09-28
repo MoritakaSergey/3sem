@@ -33,6 +33,22 @@ int closeGate(dpipe_t dp, int numOfGate)
         return 0;
 }
 
+void send(int fd, char* string)
+{
+        int i = 0;
+        while(write(fd, string + i++, (string[i] == EOF) ? 0 : 1) > 0);
+        printf("pid==%d sent: %s\n", getpid(), string);
+        return;
+}
+
+void receive(int fd, char* buffer)
+{
+        int i = 0;
+        while(read(fd, buffer + i++, 1) > 0);
+        printf("pid==%d received: %s\n", getpid(), buffer);
+        return;
+}
+
 int main() 
 {
 	return 0;
