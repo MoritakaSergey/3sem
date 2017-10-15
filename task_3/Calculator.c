@@ -7,7 +7,7 @@
 #include<sys/ipc.h>
 #include<sys/types.h>
 
-#define NUM_THREADS 3 
+#define NUM_THREADS 4 
 #define DENSITY 50000 //число точек на квадрат 1х1 площади графика.
 
 int density; //число точек на 1х1 площади графика для каждой нити.
@@ -122,8 +122,8 @@ void* Integrate(void* args) {
 
 //функции для работы с разделяемой памятью
  
-void attach(shmemory_t* mem) {
-        if ((mem->key = ftok("Receiver.c", 0)) < 0) {
+void attach(shmemory_t* mem, const char* name) {
+        if ((mem->key = ftok(name, 0)) < 0) {
                 printf("Can't generate a key for values\n");
                 exit(-1);
         }
@@ -158,7 +158,7 @@ int main (int argc, char* argv[])
 	arg_t arg = {&f, &limit};
 
 	shmemory_t shmemory;
-	attach(&shmemory);
+	attach(&shmemory, argv[0]);
 
 	arg.limit->min = shmemory.values[1];
 	arg.limit->max = shmemory.values[2];

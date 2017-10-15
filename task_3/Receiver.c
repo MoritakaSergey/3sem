@@ -14,8 +14,8 @@ typedef struct {
 	key_t key;
 } shmemory_t;
 
-void attach(shmemory_t* mem) {
-	if ((mem->key = ftok("Receiver.c", 0)) < 0) {
+void attach(shmemory_t* mem, const char* name) {
+	if ((mem->key = ftok(name, 0)) < 0) {
                 printf("Can't generate a key for values\n");
                 exit(-1);
         }
@@ -43,7 +43,7 @@ int main(int argc, char* argv[]) {
 	shmemory_t shmemory;
 	pid_t pid;
 
-	attach(&shmemory);
+	attach(&shmemory, argv[0]);
 
         shmemory.values[0] = 0;             //output: result
         shmemory.values[1] = atof(argv[2]); //input: lowerLimit
