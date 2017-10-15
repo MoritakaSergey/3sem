@@ -7,79 +7,98 @@
 #include<sys/ipc.h>
 #include<sys/types.h>
 
-#define NUM_THREADS 4 
-#define DENSITY 50000 //число точек на 1х1 площади графика
+#define NUM_THREADS 3 
+#define DENSITY 50000 //число точек на квадрат 1х1 площади графика.
 
-int density; //число точек на 1х1 площади графика для каждой нити
+int density; //число точек на 1х1 площади графика для каждой нити.
 double result;
 
-//предоставим саму функцию и её максимум и минимум на заданном отрезке
-//если максимум или минимум сложно найти, можно возвращать какую-нибудь верхнюю или нижнюю грань
+
+//структура для передачи (часто встречающихся) пар double.
 
 typedef struct {
-	double (*func)(double);
-	double (*min)(double, double);
-	double (*max)(double, double);
+        double min;
+        double max;
+} doubledouble;
+
+
+//структура для представления: 1) функции 2) её максимума и минимума на заданном отрезке.
+//если максимум или минимум сложно найти, можно возвращать какую-нибудь верхнюю или нижнюю грань.
+
+typedef struct {
+        double (*func)(double);
+        double (*min)(doubledouble*);
+        double (*max)(doubledouble*);
 } func_t;
 
+
+//структура для передачи аргументов в нити.
+
+typedef struct {
+        func_t* function;
+        doubledouble* limit;
+} arg_t;
+
+
+//структура для работы с разделяемой памятью.
+
+typedef struct {
+        double* values;
+        int shmid;
+        key_t key;
+} shmemory_t;
+
+
 //функция : возведение в квадрат
+
 double func_sqr (double x) 
 {
 	double square = x*x;
 	return square;
 }
 
-double max_sqr(double lowerLimit, double upperLimit)
+double max_sqr(doubledouble* limit)
 {
 	double max;
-	max = (func_sqr(upperLimit) > func_sqr(lowerLimit)) ? (func_sqr(upperLimit)) : (func_sqr(lowerLimit));
+	max = (func_sqr(limit->max) > func_sqr(limit->min)) ? (func_sqr(limit->max)) : (func_sqr(limit->min));
 	return max;
 }
 
-double min_sqr(double lowerLimit, double upperLimit)
+double min_sqr(doubledouble* limit)
 {
         double min;
-        if (lowerLimit <= 0 && upperLimit >= 0)
+        if (limit->min <= 0 && limit->max >= 0)
         {
                 min = 0;
                 return min;
         }
-        min = (func_sqr(upperLimit) < func_sqr(lowerLimit)) ? (func_sqr(upperLimit)) : (func_sqr(lowerLimit));
+        min = (func_sqr(limit->max) < func_sqr(limit->min)) ? (func_sqr(limit->max)) : (func_sqr(limit->min));
         return min;
 }
 
-//структура для передачи аргументов в нити
-typedef struct {
-        func_t* function;
-        double lowerLimit;
-        double upperLimit;
-} arg_t;
 
 //равномерно распределенная на заданном отрезке случайная величина
-double get_rand() { 
-	double r = ((double)rand())/RAND_MAX;
-	return r;
-}
-double get_rand_range(double min, double max) {
-	double r = (get_rand() * (max - min)) + min;
+
+double get_rand_range(doubledouble* limit, unsigned int * seed) {
+	double r = ((double)rand_r(seed))/RAND_MAX;
+	r = (r * ((limit->max) - (limit->min))) + (limit->min);
 	return r;
 }
 
-//вычисление интеграла функции в заданных пределах методом МонтеКарло в отдельной нити
-double MonteCarlo (double lowerLimit, double upperLimit, func_t* func) {
-	int i = 0;
-	int numIn = 0;
-	double max = (func->max)(lowerLimit, upperLimit);
-	double min = (func->min)(lowerLimit, upperLimit);
-	double x;
-	double y;
-	double value;
-	int N = (int)(density*(upperLimit - lowerLimit)*(max - min));
+
+//вычисление интеграла функции в заданных пределах методом Монте-Карло в отдельной нити
+
+double MonteCarlo (doubledouble* limit, doubledouble* range, double (*func)(double)) {
+	int i = 0, numIn = 0;
+	double x, y, value;
+	unsigned int seed1 = (unsigned int)pthread_self();
+	unsigned int seed2 = (unsigned int)time(NULL);
+	int N = (int)(density*(limit->max - limit->min)*(range->max - range->min));
 	for (i = 0; i < N; i++)
 	{
-		x = get_rand_range(lowerLimit, upperLimit);
-		y = get_rand_range(min, max);
-		value = (func->func)(x);
+		x = get_rand_range(limit, &seed1);
+		y = get_rand_range(range, &seed2);
+		value = func(x);
 		if (y >= 0 && value >= y) numIn++;
 		else 
 		if (y <= 0 && value <= y) numIn--;
@@ -88,24 +107,21 @@ double MonteCarlo (double lowerLimit, double upperLimit, func_t* func) {
 	return ((double)numIn)/DENSITY;
 }
 
-pthread_mutex_t lock; //mutex for volatile values
+pthread_mutex_t mutex; //mutex for volatile values
 
 void* Integrate(void* args) {
 	arg_t* arg = (arg_t*)args;
-	double addition = MonteCarlo(arg->lowerLimit, arg->upperLimit, arg->function);
-	pthread_mutex_lock(&lock); //
+        doubledouble range = {(arg->function->min)(arg->limit), (arg->function->max)(arg->limit)};
+	double addition = MonteCarlo(arg->limit, &range, arg->function->func);
+	pthread_mutex_lock(&mutex); //
 	result += addition;
-	pthread_mutex_unlock(&lock); //
+	pthread_mutex_unlock(&mutex); //
 	pthread_exit(NULL);
 }
 
-//структура для работы с разделяемой памятью
-typedef struct {
-        double* values;
-        int shmid;
-        key_t key;
-} shmemory_t;
 
+//функции для работы с разделяемой памятью
+ 
 void attach(shmemory_t* mem) {
         if ((mem->key = ftok("Receiver.c", 0)) < 0) {
                 printf("Can't generate a key for values\n");
@@ -130,29 +146,30 @@ void detach(shmemory_t* mem) {
 	return;
 }
 
+
+
 int main (int argc, char* argv[]) 
 {
         func_t f = {func_sqr, min_sqr, max_sqr};
 	pthread_t threads[NUM_THREADS];
-	double lowerLimit;
-	double upperLimit;
 	int i = 0;
 	int rc;
-	arg_t arg;
+	doubledouble limit;
+	arg_t arg = {&f, &limit};
 
 	shmemory_t shmemory;
 	attach(&shmemory);
 
-	arg.lowerLimit = lowerLimit = shmemory.values[1];
-	arg.upperLimit = upperLimit = shmemory.values[2];
-	arg.function = &f;
+	arg.limit->min = shmemory.values[1];
+	arg.limit->max = shmemory.values[2];
 	
-	srand(time(NULL));
-	rc = pthread_mutex_init(&lock, NULL); //
+	rc = pthread_mutex_init(&mutex, NULL); //
 	if (rc != 0) {
 		printf("Error on mutex initialization\n");
 	}
 	
+	srand(time(NULL));
+
 	density = DENSITY/NUM_THREADS;
 	for (i = 0; i < NUM_THREADS; i++) {
 		rc = pthread_create(&(threads[i]), NULL, Integrate, (void *)(&arg));
@@ -164,7 +181,7 @@ int main (int argc, char* argv[])
 	for (i = 0; i < NUM_THREADS; i++) {
 		pthread_join(threads[i], NULL);
 	}
-	pthread_mutex_destroy(&lock); //
+	pthread_mutex_destroy(&mutex);
 	shmemory.values[0] = result;
 	detach(&shmemory);
 	return 0;
