@@ -41,6 +41,23 @@ void receiveFile(char* path, int msqid) {
                 exit(-1);
         }
 
+	if ((code = msgrcv(msqid, (struct msgbuf*)(&msg), sizeof(msg) - sizeof(long), START, 0)) < 0) {
+                printf("ERROR: can\'t receive a start message\n");
+                exit(-1);
+        }
+        while(isFileNotReceived) {
+                if ((code = msgrcv(msqid, (struct msgbuf*)(&msg), sizeof(msg) - sizeof(long), ANYTYPE, 0)) < 0) {
+                        printf("ERROR: can\'t receive a message\n");
+                        exit(-1);
+                }
+                for (i = 0; i < maxsize; i++) {
+                        if ((code = write(file, (void*)(msg.data + i), 1)) < 0) {
+                                printf("ERROR: can\'t write in the destination file\n");
+                                exit(-1);
+                        }
+                }
+        }
+
 	if ((code = close(file)) < 0) {
                 printf("ERROR: can\'t close the destination file\n");
             	exit(-1);
