@@ -45,6 +45,12 @@ void sendFile(char* path, int msqid) {
                 exit(-1);
         }
 
+        msg.mtype = START;
+        if ((code = msgsnd(msqid, (struct msgbuf*)(&msg), sizeof(msg) - sizeof(long), 0)) < 0) {
+                printf("ERROR: can\'t send a start message\n");
+                exit(-1);
+        }
+	
         if ((code = close(file)) < 0) {
                 printf("ERROR: can\'t close the source file\n");
                 exit(-1);
