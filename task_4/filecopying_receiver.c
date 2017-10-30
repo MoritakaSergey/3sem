@@ -50,7 +50,15 @@ void receiveFile(char* path, int msqid) {
                         printf("ERROR: can\'t receive a message\n");
                         exit(-1);
                 }
-                for (i = 0; i < maxsize; i++) {
+                if (msg.mtype == END) {
+                        maxsize = ((int*)(msg.data))[0];
+                        isFileNotReceived = 0;
+                        if ((code = msgrcv(msqid, (struct msgbuf*)(&msg), sizeof(msg) - sizeof(long), DATA, 0)) < 0) {
+                                printf("ERROR: can\'t receive the last message\n");
+                                exit(-1);
+                        }
+                }
+		for (i = 0; i < maxsize; i++) {
                         if ((code = write(file, (void*)(msg.data + i), 1)) < 0) {
                                 printf("ERROR: can\'t write in the destination file\n");
                                 exit(-1);
