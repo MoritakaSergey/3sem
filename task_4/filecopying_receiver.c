@@ -24,3 +24,25 @@ int maxMessageSize(int msqid) {
         msgmax = ((struct msginfo*)(&info))->msgmax;
         return msgmax;
 }
+
+void receiveFile(char* path, int msqid);
+
+int main(int argc, char* argv[]) {
+        if (argc < 2) {
+                printf("ERROR: too few arguments");
+                exit(-1);
+        }
+        int msqid;
+        key_t key;
+        if ((key = ftok("./", 0)) < 0) {
+                printf("ERROR: can\'t generate a key\n");
+                exit(-1);
+        }
+        if ((msqid = msgget(key, 0666|IPC_CREAT)) < 0) {
+                printf("ERROR: can\'t join the message queue\n");
+                exit(-1);
+        }
+        receiveFile(argv[1], msqid);
+        return 0;
+}
+
