@@ -57,7 +57,16 @@ void sendFile(char* path, int msqid) {
                         code = read (file, (void*)(msg.data + i), 1);
                         if (code > 0) {
                                 continue;
-                        } 
+                        } else if (code == 0) {
+                                endmsg.mtype = END;
+                                endmsg.lastByteNum[0] = i;
+                                if ((code = msgsnd(msqid, (struct msgbuf*)(&endmsg), sizeof(endmsg) - sizeof(long), 0)) < 0) {
+                                        printf("ERROR: can\'t send an end message\n");
+                                        exit(-1);
+				}
+                                isFileNotSent = 0;
+                                break;
+			} 
                         printf("ERROR: can\'t read a byte from the source file\n");
                         exit(-1);
                 }
