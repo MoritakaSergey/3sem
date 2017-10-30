@@ -26,7 +26,31 @@ int maxMessageSize(int msqid) {
         return msgmax;
 }
 
-void sendFile(char* path, int msqid);
+void sendFile(char* path, int msqid) {
+        int code, i;
+        int file;
+        int maxsize = maxMessageSize(msqid);
+        struct max_msgbuf {
+                long mtype;
+                char data[maxsize];
+        } msg;
+        struct end_msgbuf {
+                long mtype;
+                int lastByteNum[maxsize/sizeof(int)];
+        } endmsg;
+        char isFileNotSent = 1;
+
+        if ((file = open(path, O_RDONLY)) < 0) {
+                printf("ERROR: can\'t open a source file\n");
+                exit(-1);
+        }
+
+        if ((code = close(file)) < 0) {
+                printf("ERROR: can\'t close the source file\n");
+                exit(-1);
+        }
+        return;
+}
 
 int main(int argc, char* argv[]) {
         if (argc < 2) {
