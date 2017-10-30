@@ -25,7 +25,32 @@ int maxMessageSize(int msqid) {
         return msgmax;
 }
 
-void receiveFile(char* path, int msqid);
+void receiveFile(char* path, int msqid) {
+	int code, i;
+        int file;
+        int maxsize = maxMessageSize(msqid);
+        struct max_msgbuf {
+                long mtype;
+                char data[maxsize];
+        } msg;
+        struct msqid_ds buf;
+        char isFileNotReceived = 1;
+
+        if ((file = creat(path, 0666)) < 0) {
+                printf("ERROR: can\'t create a destination file\n");
+                exit(-1);
+        }
+
+	if ((code = close(file)) < 0) {
+                printf("ERROR: can\'t close the destination file\n");
+            	exit(-1);
+        }
+        if ((code = msgctl(msqid, IPC_RMID, &buf)) < 0) {
+                printf("ERROR: can\'t remove the message queue\n");
+                exit(-1);
+        }
+        return;
+}
 
 int main(int argc, char* argv[]) {
         if (argc < 2) {
