@@ -51,6 +51,22 @@ void sendFile(char* path, int msqid) {
                 exit(-1);
         }
 	
+        msg.mtype = DATA;
+        while (isFileNotSent) {
+                for (i = 0; i < maxsize; i++) {
+                        code = read (file, (void*)(msg.data + i), 1);
+                        if (code > 0) {
+                                continue;
+                        } 
+                        printf("ERROR: can\'t read a byte from the source file\n");
+                        exit(-1);
+                }
+                if ((code = msgsnd(msqid, (struct msgbuf*)&msg, sizeof(msg) - sizeof(long), 0)) < 0) {
+                        printf("ERROR: can\'t send a data message\n");
+                        exit(-1);
+                }
+        }
+	
         if ((code = close(file)) < 0) {
                 printf("ERROR: can\'t close the source file\n");
                 exit(-1);
