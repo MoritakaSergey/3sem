@@ -6,6 +6,18 @@
 #include<errno.h>
 #include<fcntl.h>
 
+size_t getFileLength(int fd) {
+        struct stat buf;
+        size_t size;
+        int code;
+        if ((code = fstat(fd, &buf)) < 0) {
+                printf("ERROR: %d in fstat() at getFileLength()\n", errno);
+                exit(-1);
+        }
+        size = buf.st_size;
+        return size;
+}
+
 int touchDestinationFile(const char* pathname) {
 	int fd;
 	char handlePolicy = 1;
