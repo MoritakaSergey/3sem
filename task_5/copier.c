@@ -2,6 +2,7 @@
 #include<stdlib.h>
 #include<sys/types.h>
 #include<unistd.h>
+#include<sys/mman.h>
 #include<sys/stat.h>
 #include<errno.h>
 #include<fcntl.h>
@@ -48,6 +49,19 @@ int touchDestinationFile(const char* pathname) {
 	return fd;
 }
 
+void* my_mmap(size_t length, int fd) {
+        void* ptr;
+        if ((ptr = mmap(NULL, length, PROT_WRITE|PROT_READ, MAP_SHARED, fd, 0)) < 0) {
+                printf("ERROR: %d in my_mmap() at copyThroughMmap()\n", errno);
+                exit(-1);
+        }
+        close(fd);
+        if (ptr == MAP_FAILED) {
+                printf("ERROR: %d mapping failed in my_mmap()\n", errno);
+                exit(-1);
+        }
+        return ptr;
+}
 
 int main(int argc, char* argv[]) {
 	int fdSource, fdDestination;
