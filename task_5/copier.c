@@ -6,6 +6,7 @@
 #include<sys/stat.h>
 #include<errno.h>
 #include<fcntl.h>
+#include<string.h>
 
 size_t getFileLength(int fd) {
         struct stat buf;
@@ -63,6 +64,25 @@ void* my_mmap(size_t length, int fd) {
         return ptr;
 }
 
+void copyThroughMmap(int fdSource, int fdDestination) {
+        int i = 0;
+        size_t length = getFileLength(fdSource);
+        void* ptrSource;
+        void* ptrDestination;
+
+        ftruncate(fdDestination, length);
+
+        ptrSource = my_mmap(length, fdSource);
+        ptrDestination = my_mmap(length, fdDestination);
+
+        memcpy(ptrDestination, ptrSource, length);
+
+        munmap(ptrSource, length);
+        munmap(ptrDestination, length);
+
+        return;
+}
+
 int main(int argc, char* argv[]) {
 	int fdSource, fdDestination;
 	if (argc < 3) {
@@ -77,5 +97,6 @@ int main(int argc, char* argv[]) {
 		close(fdSource);
 		exit(0);
 	}
+	copyThroughMmap(fdSource, fdDestination);
 	return 0;
 }
