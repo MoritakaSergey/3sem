@@ -101,6 +101,16 @@ char* alingPath(const char* newRoot, const char* oldRoot, const char* path){
         return newPath;
 }
 
+char* joinNameAndPath(const char* name, const char* path) {
+        size_t nameLen = strlen(name);
+        size_t pathLen = strlen(path);
+        char* fullPath = calloc(nameLen+pathLen+1, sizeof(char));
+        memmove(fullPath, path, pathLen);
+        memmove(fullPath+pathLen, "/", 1);
+        memmove(fullPath+pathLen+1, name, nameLen);
+        return fullPath;
+}
+
 //
 //End: Операции над строками путей
 
@@ -111,6 +121,7 @@ char* alingPath(const char* newRoot, const char* oldRoot, const char* path){
 typedef struct observation {
 	int fdInotify;
 	int* fdWs;
+	char** dirs;
 	int capacity;
 	int amount;
 } obs_t;
@@ -127,19 +138,50 @@ obs_t* initializeObservation(obs_t* obs, int num) {
 		perror("calloc");
 		exit(EXIT_FAILURE);
 	}
+	obs->dirs = calloc(num, sizeof(char*));
+	if (obs->dirs == NULL) {
+		perror("calloc");
+		exit(EXIT_FAILURE);
+	}
+	obs->capacity = num;
+	obs->amount = 0;
 	return obs;	
 }
 
+char* getDirectoryFromDescriptor(obs_t* obs, int wd) {
+	int i = 0;
+	for (i = 0; i < obs->amount; i++) {
+		if (obs->fdWs[i] == wd) {
+			return obs->dirs[i];
+		}
+	}
+	return NULL;
+}
+
+int getDescriptorFromDirectory(obs_t* obs, const char* dpath) {
+	int i = 0;
+	for (i = 0; i < obs->amount; i++) {
+		if (strcmp(dpath, obs->dirs[i]) == 0) {
+			return obs->fdWs[i];
+		}
+	}
+	return 0;
+}
+
 obs_t* registerWatcher(obs_t* obs, const char* path, uint32_t trackedEvents) {
+	size_t len = strlen(path);
 	(obs->amount)++;
 	if (obs->amount == obs->capacity) {
 		obs->capacity *= 2;
 		obs->fdWs = realloc(obs->fdWs, (obs->capacity)*sizeof(int));
+		obs->dirs = realloc(obs->dirs, (obs->capacity)*sizeof(char*));
 	}
 	obs->fdWs[obs->amount] = inotify_add_watch(obs->fdInotify, path, trackedEvents);
-	if (obs->fdWs[obs->amount] == -1) {
-		exit(EXIT_FAILURE);
-	}
+        if (obs->fdWs[obs->amount] == -1) {
+                exit(EXIT_FAILURE);
+        }
+	obs->dirs[obs->amount] = calloc(len, sizeof(char));
+	memmove(obs->dirs[obs->amount], path, len);
 	return obs;
 }
 
@@ -158,9 +200,11 @@ obs_t* removeWatcher(obs_t* obs, int wd) {
 			if (inotify_rm_watch(obs->fdInotify, wd) < 0) {
 				exit(EXIT_FAILURE);
 			}
+			free(obs->dirs[i]);
 			(obs->amount)--;
 			while(i < obs->amount) {
 				obs->fdWs[i] = obs->fdWs[i+1];
+				obs->dirs[i] = obs->dirs[i+1];
 				i++;
 			}
 			return obs;	
@@ -236,6 +280,20 @@ void diffAndLog(const char* originPath, const char* updatedPath) {
 
 //Begin: Подтягивание новой версии элементов
 //
+
+void mvStoredDirectory(const char* dir, const char* destination) {
+	pid_t cpid;
+	switch(cpid = fork()) {
+		case -1:
+			exit(EXIT_FAILURE);
+		case 0:
+			execl("/bin/mv", "mv", dir, destination, NULL);
+			exit(EXIT_FAILURE);
+	}
+	waitpid(cpid, NULL, 0);
+	return;
+}
+
 void saveUpdatedFile(const char* source, char* destination) {
         pid_t cpid;
         switch(cpid = fork()) {
@@ -416,14 +474,42 @@ void handle_move_file_pull (const char* fpathFrom, const char* fpathTo, int fdLo
 //
 const int32_t trackedEvents = IN_CLOSE_WRITE|IN_MOVE|IN_CREATE|IN_DELETE;
 
-static int walkFunc(const char *fpath, const struct stat *sb,
+void handle_create_dir(obs_t* obs, char* dpath, int fdLog);
+void handle_delete_dir(obs_t* obs, char* dpath, int fdLog);
+
+//перед запуском волны в данные функции вносятся указатель на inotify объект и файловый дескриптор лога
+static int walkOnRemove(const char *fpath, const struct stat *sb,
+             int tflag, struct FTW *ftwbuf)
+{
+        static obs_t* obs;
+        static int fdLog;
+        if (fpath == NULL) {
+                obs = (obs_t*)(ftwbuf);
+                fdLog = tflag;
+                return 1;
+        }
+
+        switch(tflag) {
+                case FTW_F:
+			dprintf(fdLog, "Event: %s [regular file] was moved to a not tracked directory\n", fpath);
+			handle_delete_file_log(fpath, fdLog);
+			handle_delete_file_pull(fpath);
+                case FTW_D:
+                        handle_delete_dir(obs, fpath, fdLog);
+                case FTW_DNR:
+			dprintf(fdLog, "Warning: %s [directory] can\'t be read by the process\n", fpath);
+                default: break;
+        }
+        return 0;
+}
+
+
+static int walkOnAdd(const char *fpath, const struct stat *sb,
              int tflag, struct FTW *ftwbuf)
 {
         static obs_t* obs;
 	static int fdLog;
         if (fpath == NULL) {
-        //пропихиваем в функцию указатель на inotify объект перед началом обхода
-	//также пропихиваем файловый дескриптор файла-лога
                 obs = (obs_t*)(ftwbuf);
 		fdLog = tflag;
                 return 1;
@@ -431,33 +517,37 @@ static int walkFunc(const char *fpath, const struct stat *sb,
 
         switch(tflag) {
                 case FTW_F:
-                case FTW_D:
-                        registerWatcher(obs, fpath, trackedEvents);
+			dprintf(fdLog, "Event: %s [regular file] was moved from a not tracked directory\n", fpath);
+                	handle_create_file_log(fpath, fdLog);
+			handle_create_file_pull(fpath);
+		case FTW_D:
+                	handle_create_dir(obs, fpath, fdLog);
                 case FTW_DNR:
+			dprintf(fdLog, "Warning: %s [directory] can\'t be read by the process\n", fpath);
 		default: break;
         }
-        printf("%-3s %2d %7jd   %-40s %d %s\n",
-        (tflag == FTW_D) ?   "d"   : (tflag == FTW_DNR) ? "dnr" :
-        (tflag == FTW_DP) ?  "dp"  : (tflag == FTW_F) ?   "f" :
-        (tflag == FTW_NS) ?  "ns"  : (tflag == FTW_SL) ?  "sl" :
-        (tflag == FTW_SLN) ? "sln" : "???",
-        ftwbuf->level, (intmax_t) sb->st_size,
-        fpath, ftwbuf->base, fpath + ftwbuf->base);
-
-        return 0;           /* To tell nftw() to continue */
+        return 0;
 }
 
-int doWalk(obs_t* obs, char *pathDir)
+int doWalkOnAdd(obs_t* obs, char *dpath, int fdLog)
 {
         int numDirOpenedSim = 1;
         int flags = FTW_PHYS;
-	int fdLog = getFdLog();
         walkFunc(NULL, NULL, fdLog, (struct FTW*)(obs));
-        if (nftw(pathDir, walkFunc, numDirOpenedSim, flags) == -1) {
+        if (nftw(pathDir, walkOnAdd, numDirOpenedSim, flags) == -1) {
                 perror("nftw");
                 exit(EXIT_FAILURE);
         }
-	close(fdLog);
+}
+
+int doWalkOnRemove(obs_t* obs, char *dpath, int fdLog) {
+	int numDirOpenedSim = 1;
+        int flags = FTW_PHYS|FTW_DEPTH;
+        walkFunc(NULL, NULL, fdLog, (struct FTW*)(obs));
+        if (nftw(pathDir, walkOnAdd, numDirOpenedSim, flags) == -1) {
+                perror("nftw");
+                exit(EXIT_FAILURE);
+        }
 }
 //
 //End: Обход неотслеживаемой ветви
@@ -466,16 +556,41 @@ int doWalk(obs_t* obs, char *pathDir)
 //Begin: Обработчики событий с директориями
 //
 
-void handle_create_dir_log() {
+void handle_create_dir(obs_t* obs, char* dpath, int fdLog) {
+	registerWatcher(obs, dpath, trackedEvents);
+	writeTime(fdLog);
+	handle_create_file_pull(dpath);
 }
 
-void handle_delete_dir_log() {
+void handle_delete_dir(obs_t* obs, char* dpath, int fdLog) {
+	int wd = getDescriptorFromDirectory(obs, dpath);
+	removeWatcher(obs, wd);
+	writeTime(fdLog);
+	handle_delete_file_pull(dpath);
 }
 
-void handle_move_dir_log() {
-
+void handle_move_dir(obs_t* obs, char* dpathFrom, char* dpathTo, int fdLog) {
+	char* oldName;
+	char* newName;
+	if (dpathFrom == NULL) {
+		dprintf(fdLog, "Event: %s [directory] was moved from external directory\n", dpathTo);
+		doWalkOnAdd(obs, dpathTo, fdLog);
+		return;
+	}
+	if (dpathTo == NULL) {
+		dprintf(fdLog, "Event: %s [directory] was moved to external directory\n", dpathFrom);
+		doWalkOnRemove(obs, dpathFrom, fdLog);
+		return;
+	}
+	oldName = resolveName(dpathFrom);
+        newName = resolveName(dpathTo);
+        if (strcmp(oldName, newName) == 0) {
+                dprintf(fdLog, "Event: %s [directory] was moved and now is %s", dpathFrom, dpathTo);
+        } else {
+                dprintf(fdLog, "Event: %s [directory] was renamed and now is %s", dpathFrom, dpathTo);
+        }
+        writeTime(fdLog);
 }
-
 
 //
 //End: Обработчики событий с директориями
@@ -559,7 +674,6 @@ void createServiceDirectory(obs_t* serviceObs) {
         close(repairFile(aPath));
         free(aPath);
         handle_info(serviceObs, NULL);
-
 	saveTrackedDirectory(trackedDirectory);
 }
 
@@ -567,23 +681,119 @@ void createServiceDirectory(obs_t* serviceObs) {
 //End: Управление служебной директорией
 
 
+//Begin: Распределение по обработчикам
+//
+void handle_moved(obs_t* obs, const struct inotify_event* event) {
+	static struct inotify_event lastEvent = NULL;
+	int fdLog = getFdLog();
+	char* pathFrom;
+	char* pathTo;
+	char* fullPathFrom;
+	char* fullPathTo;
+	if (lastEvent == NULL) {
+		if (event == NULL) {
+			return;
+		}
+		if (event->mask & IN_MOVED) {
+			lastEvent = event;
+		}
+		return;
+	}
+	if (lastEvent->mask & IN_ISDIR) {
+		if (lastEvent->mask & IN_MOVED_FROM) {
+			pathFrom = getDirectoryFromDescriptor(lastEvent->wd);
+                        fullPathFrom = joinNameAndPath(lastEvent->name, pathFrom);
+			if ((event == NULL) || !(event->mask & IN_ISDIR) || !(event->mask & IN_MOVED_TO) || !(event->cookie == lastEvent->cookie)) {
+				handle_move_dir(obs, fullPathFrom, NULL, fdLog);
+			} else {
+				pathTo = getDirectoryFromDescriptor(event->wd);
+				fullPathTo = joinNameAndPath(event->name, pathTo);
+				handle_move_dir(obs, fullPathFrom, fullPathTo, fdLog);
+				free(fullPathTo);
+				free(pathTo);
+			}
+			free(fullPathFrom);
+                        free(pathFrom);
+			close(fdLog);
+			return;
+		}
+		if (lastEvent->mask & IN_MOVED_TO) {
+			pathTo = getDirectoryFromDescriptor(lastEvent->wd);
+                        fullPathTo = joinNameAndPath(lastEvent->name, pathTo);
+                        if ((event == NULL) || !(event->mask & IN_ISDIR) || !(event->mask & IN_MOVED_FROM) || !(event->cookie == lastEvent->cookie)) {
+                                handle_move_dir(obs, NULL, fullPathTo, fdLog);
+                        } else {
+                                pathFrom = getDirectoryFromDescriptor(event->wd);
+                                fullPathFrom = joinNameAndPath(event->name, pathFrom);
+                                handle_move_dir(obs, fullPathFrom, fullPathTo, fdLog);
+                                free(fullPathFrom);
+                                free(pathFrom);
+                        }
+                        free(fullPathTo);
+                        free(pathTo);
+                        close(fdLog);
+                        return;
+		}
+	} else {
+                if (lastEvent->mask & IN_MOVED_FROM) {
+                        pathFrom = getDirectoryFromDescriptor(lastEvent->wd);
+                        fullPathFrom = joinNameAndPath(lastEvent->name, pathFrom);
+                        if ((event == NULL) || (event->mask & IN_ISDIR) || !(event->mask & IN_MOVED_TO) || !(event->cookie == lastEvent->cookie)) {
+                 	        handle_move_file_log(fullPathFrom, NULL, fdLog);
+                                handle_move_file_pull(fullPathFrom, NULL);
 
-void handle_moved() {
+			} else {
+                                pathTo = getDirectoryFromDescriptor(event->wd);
+                                fullPathTo = joinNameAndPath(event->name, pathTo);
+                                handle_move_file_log(fullPathFrom, fullPathTo, fdLog);
+				handle_move_file_pull(fullPathFrom, fullPathTo);
+                                free(fullPathTo);
+                                free(pathTo);
+                        }
+                        free(fullPathFrom);
+                        free(pathFrom);
+                        close(fdLog);
+                        return;
+                }
+                if (lastEvent->mask & IN_MOVED_TO) {
+                        pathTo = getDirectoryFromDescriptor(lastEvent->wd);
+                        fullPathTo = joinNameAndPath(lastEvent->name, pathTo);
+                        if ((event == NULL) || (event->mask & IN_ISDIR) || !(event->mask & IN_MOVED_FROM) || !(event->cookie == lastEvent->cookie)) {
+                                handle_move_file_log(NULL, fullPathTo, fdLog);
+				handle_move_file_pull(NULL, fullPathTo);
+                        } else {
+                                pathFrom = getDirectoryFromDescriptor(event->wd);
+                                fullPathFrom = joinNameAndPath(event->name, pathFrom);
+                                handle_move_file_log(fullPathFrom, fullPathTo, fdLog);
+				handle_move_file_pull(fullPathFrom, fullPathTo);
+                                free(fullPathFrom);
+                                free(pathFrom);
+                        }
+                        free(fullPathTo);
+                        free(pathTo);
+                        close(fdLog);
+                        return;
+		
+		
+	}
 }
 
-void handle_create(const struct inotify_event* event) {
+void handle_create(obs_t* obs, const struct inotify_event* event) {
 	int fdLog = getFdLog();
+
         dprintf(fdLog, "Event: %s [regular file] was created\n", event->name);
 }
 //(event->name) NEED FIX!!!!!!!!!!
-void handle_delete(const struct inotify_event* event) {
+void handle_delete(obs_t* obs, const struct inotify_event* event) {
 	int fdLog = getFdLog();
         dprintf(fdLog, "Event: %s [regular file] was deleted\n", event->name);
 }
 
-void handle_modify() {
-
+void handle_modify(obs_t* obs, const struct inotify_event* event) {
+	
 }
+//
+//End: Распределение по обработчикам
 
 void handle_events(int fdInotify, int *wd) {
 	char buf[4096]
@@ -625,6 +835,9 @@ void handle_events(int fdInotify, int *wd) {
 				printf("%s", event->name);
 			}
 			
+	                if (event->len)
+		                printf("%s", event->name);
+
 			if (event->mask & IN_ISDIR) {
 				printf(" [directory]\n");
 			} else {
